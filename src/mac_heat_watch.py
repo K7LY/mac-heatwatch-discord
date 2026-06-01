@@ -214,6 +214,20 @@ def build_discord_message(reading: Reading, band: str, process_summary: str) -> 
     )[:1900]
 
 
+def build_recovery_message(reading: Reading, previous_band: str) -> str:
+    previous_label = BAND_LABEL_JA.get(previous_band, previous_band)
+    return "\n".join(
+        [
+            "復旧: Mac mini の温度が normal 帯（通常）に戻りました",
+            f"機種: {reading.machine}",
+            f"時刻: {reading.timestamp}",
+            f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
+            f"前回通知帯: {previous_band}（{previous_label}）",
+            "基準: normal 60℃未満",
+        ]
+    )[:1900]
+
+
 def post_discord(webhook_url: str, content: str, dry_run: bool) -> None:
     payload = {
         "content": content,
@@ -270,6 +284,16 @@ def main() -> int:
     now = datetime.now().isoformat(timespec="seconds")
 
     if band == "normal":
+        last_notified = state.get("last_notified_band")
+        if isinstance(last_notified, str):
+            webhook_url = load_webhook_url(config)
+            if not webhook_url:
+                log("recovery notification skipped: DISCORD_WARNING_WEBHOOK_URL is missing")
+                print("DISCORD_WARNING_WEBHOOK_URL が見つからないため復旧通知できません。", file=sys.stderr)
+                return 2
+            post_discord(webhook_url, build_recovery_message(reading, last_notified), args.dry_run)
+            log(f"recovered: from {last_notified} CPU {format_temp(reading.cpu_temp)} / GPU {format_temp(reading.gpu_temp)}")
+
         write_state({
             "last_seen_at": now,
             "last_band": band,

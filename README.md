@@ -9,6 +9,7 @@ Codex heartbeat ではなく、macOS の `launchd` LaunchAgent として動か�
 - `macmon pipe --soc-info` で CPU/GPU 平均温度を取得
 - CPU/GPU の高い方を現在の温度帯として判定
 - `60℃` 未満に戻ったら通知状態をリセット
+- 通知済みの温度帯から `60℃` 未満に戻った場合は、正常化したことも通知
 - 同じ温度帯に居続けている間は再通知しない
 - より高い温度帯に上がったら再通知
 - 通知時だけ `ps` で CPU/メモリ上位プロセスを確認し、原因候補として添える
@@ -51,7 +52,7 @@ Discord へ送らず、送信予定の payload だけ確認する場合:
 /usr/bin/python3 ./src/mac_heat_watch.py --dry-run --print-status
 ```
 
-現在の温度が `60℃` 未満なら通知条件に入らないため、payload は出ません。
+現在の温度が `60℃` 未満で、直前に通知済みの温度帯がなければ payload は出ません。
 
 ## LaunchAgent としてインストール
 
