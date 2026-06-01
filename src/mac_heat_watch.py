@@ -9,6 +9,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +72,19 @@ def run_command(args: list[str], timeout: int = 20) -> subprocess.CompletedProce
     )
 
 
+def find_executable(name: str, extra_paths: list[str] | None = None) -> str:
+    path = shutil.which(name)
+    if path:
+        return path
+
+    for directory in extra_paths or []:
+        candidate = Path(directory) / name
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    return name
+
+
 def read_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         return {}
@@ -115,8 +129,9 @@ def load_webhook_url(config: dict[str, Any]) -> str | None:
 
 
 def read_macmon(samples: int, interval_ms: int) -> Reading:
+    macmon_path = find_executable("macmon", ["/opt/homebrew/bin", "/usr/local/bin"])
     result = run_command(
-        ["macmon", "pipe", "--samples", str(samples), "--interval", str(interval_ms), "--soc-info"],
+        [macmon_path, "pipe", "--samples", str(samples), "--interval", str(interval_ms), "--soc-info"],
         timeout=max(20, samples * interval_ms // 1000 + 10),
     )
     if result.returncode != 0:
