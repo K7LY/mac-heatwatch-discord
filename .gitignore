@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Runtime state and logs are intentionally outside the repository, but keep
+# local copies out if someone points the app support path into the repo.
+state.json
+config.json
+*.log
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
