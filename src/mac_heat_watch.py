@@ -256,6 +256,8 @@ def post_discord(webhook_url: str, content: str, dry_run: bool) -> None:
 def should_notify(state: dict[str, Any], band: str) -> bool:
     if band == "normal":
         return False
+    if band == "danger":
+        return True
     last_notified = state.get("last_notified_band")
     if not isinstance(last_notified, str):
         return True
