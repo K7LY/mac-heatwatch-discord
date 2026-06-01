@@ -163,16 +163,16 @@ def band_for(temp_c: float) -> str:
 
 
 def top_processes(sort_flag: str) -> list[dict[str, str]]:
-    result = run_command(["ps", sort_flag, "-wwxo", "pid,pcpu,pmem,comm,args"], timeout=10)
+    result = run_command(["ps", sort_flag, "-xo", "pid,pcpu,pmem,comm"], timeout=10)
     if result.returncode != 0:
         return []
     rows = []
     for line in result.stdout.splitlines()[1:8]:
-        parts = line.split(None, 4)
-        if len(parts) < 5:
+        parts = line.split(None, 3)
+        if len(parts) < 4:
             continue
-        pid, cpu, mem, command, args = parts
-        rows.append({"pid": pid, "cpu": cpu, "mem": mem, "command": command, "args": args})
+        pid, cpu, mem, command = parts
+        rows.append({"pid": pid, "cpu": cpu, "mem": mem, "command": command})
     return rows
 
 
