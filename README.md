@@ -89,8 +89,6 @@ Discord へ送らず、送信予定の payload だけ確認する場合:
 
 ## LaunchAgent としてインストール
 
-`launchd` は macOS のサービス管理システムの正式名称です。このツールはユーザー用の LaunchAgent として定期実行されます。
-
 ```bash
 ./scripts/install_launch_agent.sh
 ```
