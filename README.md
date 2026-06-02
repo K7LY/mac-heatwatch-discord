@@ -1,8 +1,6 @@
 # mac-heatwatch-discord
 
-Mac mini のチップ温度を `macmon` で30分ごとに確認し、想定外の発熱上昇を Discord に日本語で通知する叩き台です。
-
-Codex heartbeat ではなく、macOS の `launchd` LaunchAgent として動かします。
+Mac mini のチップ温度を `macmon` で定期的に確認し、想定外の発熱上昇を Discord に日本語で通知します。
 
 ## 動作
 
@@ -91,6 +89,8 @@ Discord へ送らず、送信予定の payload だけ確認する場合:
 
 ## LaunchAgent としてインストール
 
+`launchd` は macOS のサービス管理システムの正式名称です。このツールはユーザー用の LaunchAgent として定期実行されます。
+
 ```bash
 ./scripts/install_launch_agent.sh
 ```
@@ -101,10 +101,6 @@ Discord へ送らず、送信予定の payload だけ確認する場合:
 ./scripts/uninstall_launch_agent.sh
 ```
 
-## License
-
-MIT
-
 ## ログと状態
 
 - ログ: `~/Library/Logs/mac-heat-watch/`
@@ -112,3 +108,7 @@ MIT
 - 任意設定: `~/Library/Application Support/mac-heat-watch/config.json`
 
 `discord_warning_webhook_url` を `config.json` に直接置くこともできますが、秘密情報なので Keychain 推奨です。
+
+## License
+
+MIT
