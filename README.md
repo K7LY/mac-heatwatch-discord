@@ -1,17 +1,40 @@
 # mac-heatwatch-discord
 
+Periodically checks Mac mini chip temperatures with `macmon` and sends Japanese Discord notifications when unexpected heat rises are detected.
+
 Mac mini のチップ温度を `macmon` で定期的に確認し、想定外の発熱上昇を Discord に日本語で通知します。
+
+## Behavior
+
+- Reads average CPU/GPU temperatures with `macmon pipe --soc-info`
+- Uses the higher CPU/GPU temperature as the current heat level
+- Resets notification state when the temperature returns below `60 C`
+- Sends a recovery notification when a previously notified band returns to normal
+- Suppresses repeated notifications while staying in the same band
+- Sends another notification when the temperature moves into a higher band
+- Always notifies on every run while in the highest band, `danger` by default
+- Includes likely load-causing processes from `ps`, without process arguments
 
 ## 動作
 
 - `macmon pipe --soc-info` で CPU/GPU 平均温度を取得
 - CPU/GPU の高い方を現在の温度帯として判定
 - `60℃` 未満に戻ったら通知状態をリセット
-- 通知済みの温度帯から `60℃` 未満に戻った場合は、正常化したことも通知
+- 通知済みの温度帯から normal に戻った場合は、正常化したことも通知
 - 同じ温度帯に居続けている間は再通知しない
 - より高い温度帯に上がったら再通知
-- `danger`（90℃以上）だけは例外として、danger帯にいる間は毎回通知
-- 通知時だけ `ps` で CPU/メモリ上位プロセスを確認し、原因候補として添える
+- 一番上の温度帯、デフォルトでは `danger`、にいる間は毎回通知
+- 通知時だけ `ps` で原因候補プロセスを確認し、プロセス引数は含めない
+
+## Temperature Bands
+
+| band | range |
+| --- | --- |
+| normal | below 60 C |
+| watch | 60.0-69.9 C |
+| elevated | 70.0-79.9 C |
+| hot | 80.0-89.9 C |
+| danger | 90.0 C or higher |
 
 ## 温度帯
 
@@ -22,6 +45,72 @@ Mac mini のチップ温度を `macmon` で定期的に確認し、想定外の�
 | elevated | 70.0〜79.9℃ |
 | hot | 80.0〜89.9℃ |
 | danger | 90.0℃以上 |
+
+## Requirements
+
+```bash
+brew install macmon
+```
+
+Discord warning webhook URLs should be stored in Keychain.
+
+```bash
+export DISCORD_WARNING_WEBHOOK_URL='<your Discord warning webhook URL>'
+./scripts/save_webhook_to_keychain.sh
+unset DISCORD_WARNING_WEBHOOK_URL
+```
+
+The URL is stored under the `DISCORD_WARNING_WEBHOOK_URL` Keychain service name. The app reads the webhook URL from environment variables, Keychain, or config, in that order.
+
+## 前提
+
+```bash
+brew install macmon
+```
+
+Discord の warning webhook URL は Keychain に保存する運用を推奨します。
+
+```bash
+export DISCORD_WARNING_WEBHOOK_URL='<your Discord warning webhook URL>'
+./scripts/save_webhook_to_keychain.sh
+unset DISCORD_WARNING_WEBHOOK_URL
+```
+
+URLは `DISCORD_WARNING_WEBHOOK_URL` という Keychain service 名で保存されます。アプリは環境変数、Keychain、設定ファイルの順で webhook URL を読み込みます。
+
+## Configuration
+
+Put the config file at `~/Library/Application Support/mac-heat-watch/config.json`.
+
+```bash
+mkdir -p "$HOME/Library/Application Support/mac-heat-watch"
+cp ./config.example.json "$HOME/Library/Application Support/mac-heat-watch/config.json"
+```
+
+Main options:
+
+- `interval_seconds`: monitoring interval. Default is `1800` seconds. Run `./scripts/install_launch_agent.sh` again after changing it
+- `notify_on_recovery`: when `true`, notify when a notified band returns to normal
+- `repeat_highest_band`: when `true`, notify on every run while in the highest band
+- `temperature_bands`: configurable temperature bands. The first band must be `normal`, and the final band must have `"max_c": null`
+- `keychain_service`: Keychain service name used to read the webhook URL
+
+Example:
+
+```json
+{
+  "interval_seconds": 1800,
+  "notify_on_recovery": true,
+  "repeat_highest_band": true,
+  "temperature_bands": [
+    { "name": "normal", "label_ja": "通常", "min_c": 0, "max_c": 60 },
+    { "name": "watch", "label_ja": "注意", "min_c": 60, "max_c": 70 },
+    { "name": "elevated", "label_ja": "警戒", "min_c": 70, "max_c": 80 },
+    { "name": "hot", "label_ja": "高温", "min_c": 80, "max_c": 90 },
+    { "name": "danger", "label_ja": "危険", "min_c": 90, "max_c": null }
+  ]
+}
+```
 
 ## 設定
 
@@ -57,21 +146,19 @@ cp ./config.example.json "$HOME/Library/Application Support/mac-heat-watch/confi
 }
 ```
 
-## 前提
+## Manual Check
 
 ```bash
-brew install macmon
+/usr/bin/python3 ./src/mac_heat_watch.py --print-status
 ```
 
-Discord の warning webhook URL は、環境変数をそのまま launchd に渡すより Keychain に保存する運用を想定しています。
+To inspect the outgoing Discord payload without sending it:
 
 ```bash
-export DISCORD_WARNING_WEBHOOK_URL='<your Discord warning webhook URL>'
-./scripts/save_webhook_to_keychain.sh
-unset DISCORD_WARNING_WEBHOOK_URL
+/usr/bin/python3 ./src/mac_heat_watch.py --dry-run --print-status
 ```
 
-URLは `DISCORD_WARNING_WEBHOOK_URL` という Keychain service 名で保存されます。スクリプトは環境変数、Keychain、設定ファイルの順で利用できます。
+No payload is produced when the current temperature is normal and no previous notification is pending recovery.
 
 ## 手動確認
 
@@ -85,7 +172,19 @@ Discord へ送らず、送信予定の payload だけ確認する場合:
 /usr/bin/python3 ./src/mac_heat_watch.py --dry-run --print-status
 ```
 
-現在の温度が `60℃` 未満で、直前に通知済みの温度帯がなければ payload は出ません。
+現在の温度が normal で、直前に通知済みの温度帯がなければ payload は出ません。
+
+## Install as a LaunchAgent
+
+```bash
+./scripts/install_launch_agent.sh
+```
+
+Uninstall:
+
+```bash
+./scripts/uninstall_launch_agent.sh
+```
 
 ## LaunchAgent としてインストール
 
@@ -98,6 +197,14 @@ Discord へ送らず、送信予定の payload だけ確認する場合:
 ```bash
 ./scripts/uninstall_launch_agent.sh
 ```
+
+## Logs and State
+
+- Logs: `~/Library/Logs/mac-heat-watch/`
+- State: `~/Library/Application Support/mac-heat-watch/state.json`
+- Optional config: `~/Library/Application Support/mac-heat-watch/config.json`
+
+You can put `discord_warning_webhook_url` directly in `config.json`, but Keychain is recommended for secrets.
 
 ## ログと状態
 
