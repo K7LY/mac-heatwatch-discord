@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import plistlib
 import subprocess
 import sys
 import urllib.error
@@ -22,21 +21,22 @@ STATE_PATH = APP_SUPPORT / "state.json"
 CONFIG_PATH = APP_SUPPORT / "config.json"
 LOG_PATH = Path.home() / "Library" / "Logs" / APP_NAME / "watch.log"
 
-BANDS = [
-    ("normal", 0.0, 60.0),
-    ("watch", 60.0, 70.0),
-    ("elevated", 70.0, 80.0),
-    ("hot", 80.0, 90.0),
-    ("danger", 90.0, None),
+
+@dataclass(frozen=True)
+class Band:
+    name: str
+    label_ja: str
+    min_c: float
+    max_c: float | None
+
+
+DEFAULT_BANDS = [
+    Band("normal", "通常", 0.0, 60.0),
+    Band("watch", "注意", 60.0, 70.0),
+    Band("elevated", "警戒", 70.0, 80.0),
+    Band("hot", "高温", 80.0, 90.0),
+    Band("danger", "危険", 90.0, None),
 ]
-BAND_RANK = {name: index for index, (name, _, _) in enumerate(BANDS)}
-BAND_LABEL_JA = {
-    "normal": "通常",
-    "watch": "注意",
-    "elevated": "警戒",
-    "hot": "高温",
-    "danger": "危険",
-}
 
 
 @dataclass(frozen=True)
@@ -88,8 +88,79 @@ def find_executable(name: str, extra_paths: list[str] | None = None) -> str:
 def read_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         return {}
-    with CONFIG_PATH.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    try:
+        with CONFIG_PATH.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        log(f"invalid config; using defaults: {exc}")
+        return {}
+
+
+def config_bool(config: dict[str, Any], key: str, default: bool) -> bool:
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+
+def load_bands(config: dict[str, Any]) -> list[Band]:
+    raw_bands = config.get("temperature_bands", config.get("bands"))
+    if not isinstance(raw_bands, list):
+        return DEFAULT_BANDS
+
+    bands: list[Band] = []
+    try:
+        for item in raw_bands:
+            if not isinstance(item, dict):
+                raise ValueError("band entries must be objects")
+            name = str(item["name"])
+            label_ja = str(item.get("label_ja", name))
+            min_c = float(item.get("min_c", item.get("min")))
+            raw_max = item.get("max_c", item.get("max"))
+            max_c = None if raw_max is None else float(raw_max)
+            if max_c is not None and max_c <= min_c:
+                raise ValueError(f"band {name} has max_c <= min_c")
+            bands.append(Band(name, label_ja, min_c, max_c))
+    except (KeyError, TypeError, ValueError) as exc:
+        log(f"invalid temperature_bands config; using defaults: {exc}")
+        return DEFAULT_BANDS
+
+    bands.sort(key=lambda band: band.min_c)
+    if not bands or bands[0].name != "normal" or bands[-1].max_c is not None:
+        log("invalid temperature_bands config; using defaults: first band must be normal and last max_c must be null")
+        return DEFAULT_BANDS
+    return bands
+
+
+def band_rank(bands: list[Band]) -> dict[str, int]:
+    return {band.name: index for index, band in enumerate(bands)}
+
+
+def band_label(bands: list[Band], name: str) -> str:
+    for band in bands:
+        if band.name == name:
+            return band.label_ja
+    return name
+
+
+def highest_band_name(bands: list[Band]) -> str:
+    return bands[-1].name
+
+
+def thresholds_summary(bands: list[Band], include_normal: bool = False) -> str:
+    parts = []
+    for band in bands:
+        if band.name == "normal" and not include_normal:
+            continue
+        if band.max_c is None:
+            parts.append(f"{band.name} {band.min_c:g}℃以上")
+        elif band.name == "normal":
+            parts.append(f"{band.name} {band.max_c:g}℃未満")
+        else:
+            parts.append(f"{band.name} {band.min_c:g}℃以上")
+    return " / ".join(parts)
 
 
 def read_state() -> dict[str, Any]:
@@ -155,10 +226,10 @@ def read_macmon(samples: int, interval_ms: int) -> Reading:
     )
 
 
-def band_for(temp_c: float) -> str:
-    for name, low, high in BANDS:
-        if temp_c >= low and (high is None or temp_c < high):
-            return name
+def band_for(temp_c: float, bands: list[Band]) -> str:
+    for band in bands:
+        if temp_c >= band.min_c and (band.max_c is None or temp_c < band.max_c):
+            return band.name
     return "normal"
 
 
@@ -198,32 +269,33 @@ def format_temp(value: float | None) -> str:
     return "不明" if value is None else f"{value:.1f}℃"
 
 
-def build_discord_message(reading: Reading, band: str, process_summary: str) -> str:
-    severity = "危険" if band == "danger" else "注意"
+def build_discord_message(reading: Reading, band: str, bands: list[Band], process_summary: str) -> str:
+    severity = "危険" if band == highest_band_name(bands) else "注意"
     return "\n".join(
         [
-            f"{severity}: Mac mini の温度が {band} 帯（{BAND_LABEL_JA[band]}）に入りました",
+            f"{severity}: Mac mini の温度が {band} 帯（{band_label(bands, band)}）に入りました",
             f"機種: {reading.machine}",
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
             f"現在の温度帯: {band}",
-            "基準: watch 60℃以上 / elevated 70℃以上 / hot 80℃以上 / danger 90℃以上",
+            f"基準: {thresholds_summary(bands)}",
             "原因候補:",
             process_summary,
         ]
     )[:1900]
 
 
-def build_recovery_message(reading: Reading, previous_band: str) -> str:
-    previous_label = BAND_LABEL_JA.get(previous_band, previous_band)
+def build_recovery_message(reading: Reading, previous_band: str, bands: list[Band]) -> str:
+    normal_label = band_label(bands, "normal")
+    previous_label = band_label(bands, previous_band)
     return "\n".join(
         [
-            "復旧: Mac mini の温度が normal 帯（通常）に戻りました",
+            f"復旧: Mac mini の温度が normal 帯（{normal_label}）に戻りました",
             f"機種: {reading.machine}",
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
             f"前回通知帯: {previous_band}（{previous_label}）",
-            "基準: normal 60℃未満",
+            f"基準: {thresholds_summary(bands, include_normal=True)}",
         ]
     )[:1900]
 
@@ -253,15 +325,16 @@ def post_discord(webhook_url: str, content: str, dry_run: bool) -> None:
         raise RuntimeError(f"Discord returned HTTP {exc.code}: {body}") from exc
 
 
-def should_notify(state: dict[str, Any], band: str) -> bool:
+def should_notify(state: dict[str, Any], band: str, bands: list[Band], repeat_highest_band: bool) -> bool:
     if band == "normal":
         return False
-    if band == "danger":
+    if repeat_highest_band and band == highest_band_name(bands):
         return True
     last_notified = state.get("last_notified_band")
     if not isinstance(last_notified, str):
         return True
-    return BAND_RANK[band] > BAND_RANK.get(last_notified, -1)
+    ranks = band_rank(bands)
+    return ranks[band] > ranks.get(last_notified, -1)
 
 
 def main() -> int:
@@ -273,6 +346,9 @@ def main() -> int:
     args = parser.parse_args()
 
     config = read_config()
+    bands = load_bands(config)
+    notify_on_recovery = config_bool(config, "notify_on_recovery", True)
+    repeat_highest_band = config_bool(config, "repeat_highest_band", True)
     state = read_state()
 
     try:
@@ -282,18 +358,18 @@ def main() -> int:
         print(f"温度取得に失敗しました: {exc}", file=sys.stderr)
         return 1
 
-    band = band_for(reading.heat_level)
+    band = band_for(reading.heat_level, bands)
     now = datetime.now().isoformat(timespec="seconds")
 
     if band == "normal":
         last_notified = state.get("last_notified_band")
-        if isinstance(last_notified, str):
+        if notify_on_recovery and isinstance(last_notified, str):
             webhook_url = load_webhook_url(config)
             if not webhook_url:
                 log("recovery notification skipped: DISCORD_WARNING_WEBHOOK_URL is missing")
                 print("DISCORD_WARNING_WEBHOOK_URL が見つからないため復旧通知できません。", file=sys.stderr)
                 return 2
-            post_discord(webhook_url, build_recovery_message(reading, last_notified), args.dry_run)
+            post_discord(webhook_url, build_recovery_message(reading, last_notified, bands), args.dry_run)
             log(f"recovered: from {last_notified} CPU {format_temp(reading.cpu_temp)} / GPU {format_temp(reading.gpu_temp)}")
 
         write_state({
@@ -309,7 +385,7 @@ def main() -> int:
             print(message)
         return 0
 
-    if not should_notify(state, band):
+    if not should_notify(state, band, bands, repeat_highest_band):
         write_state({
             **state,
             "last_seen_at": now,
@@ -330,7 +406,7 @@ def main() -> int:
         return 2
 
     process_summary = summarize_processes()
-    content = build_discord_message(reading, band, process_summary)
+    content = build_discord_message(reading, band, bands, process_summary)
     post_discord(webhook_url, content, args.dry_run)
 
     write_state({
