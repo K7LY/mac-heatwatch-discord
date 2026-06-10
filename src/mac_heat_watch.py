@@ -368,9 +368,10 @@ def format_temp(value: float | None) -> str:
 
 
 def build_discord_message(reading: Reading, band: str, bands: list[Band], process_summary: str) -> str:
+    severity = "危険" if band == highest_band_name(bands) else "注意"
     return "\n".join(
         [
-            f"Mac mini の温度が {band_threshold_text(bands, band)}を超えました",
+            f"{severity}: Mac mini の温度が {band_threshold_text(bands, band)}を超えました",
             f"機種: {reading.machine}",
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
@@ -384,7 +385,7 @@ def build_discord_message(reading: Reading, band: str, bands: list[Band], proces
 def build_recovery_message(reading: Reading, previous_band: str, bands: list[Band]) -> str:
     return "\n".join(
         [
-            f"Mac mini の温度が {normal_threshold_text(bands)}に戻りました",
+            f"復旧: Mac mini の温度が {normal_threshold_text(bands)}に戻りました",
             f"機種: {reading.machine}",
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
