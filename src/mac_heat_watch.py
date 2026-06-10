@@ -299,20 +299,37 @@ def top_processes(sort_flag: str) -> list[dict[str, str]]:
     return rows
 
 
+def logical_cpu_count() -> int:
+    result = run_command(["sysctl", "-n", "hw.ncpu"], timeout=5)
+    if result.returncode != 0:
+        return 1
+    try:
+        return max(1, int(result.stdout.strip()))
+    except ValueError:
+        return 1
+
+
 def summarize_processes() -> str:
     cpu_rows = top_processes("-arc")
     mem_rows = top_processes("-arm")
+    cpu_count = logical_cpu_count()
 
     def compact(rows: list[dict[str, str]], metric: str, limit: int = 5) -> str:
         items = []
         for row in rows[:limit]:
             command = Path(row["command"]).name or row["command"]
-            value = row["cpu"] if metric == "cpu" else row["mem"]
-            items.append(f"{command} {value}%")
+            if metric == "cpu":
+                try:
+                    value = float(row["cpu"]) / cpu_count
+                except ValueError:
+                    value = 0.0
+                items.append(f"{command} {value:.1f}%")
+            else:
+                items.append(f"{command} {row['mem']}%")
         return "、".join(items) if items else "取得できませんでした"
 
     return (
-        f"CPU上位: {compact(cpu_rows, 'cpu')}\n"
+        f"CPU上位（全体比）: {compact(cpu_rows, 'cpu')}\n"
         f"メモリ上位: {compact(mem_rows, 'mem', limit=3)}"
     )
 
