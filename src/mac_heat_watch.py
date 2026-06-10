@@ -166,6 +166,13 @@ def highest_band_name(bands: list[Band]) -> str:
     return bands[-1].name
 
 
+def band_by_name(bands: list[Band], name: str) -> Band | None:
+    for band in bands:
+        if band.name == name:
+            return band
+    return None
+
+
 def first_non_normal_band_name(bands: list[Band]) -> str | None:
     for band in bands:
         if band.name != "normal":
@@ -185,6 +192,20 @@ def thresholds_summary(bands: list[Band], include_normal: bool = False) -> str:
         else:
             parts.append(f"{band.name} {band.min_c:g}℃以上")
     return " / ".join(parts)
+
+
+def band_threshold_text(bands: list[Band], name: str) -> str:
+    band = band_by_name(bands, name)
+    if band is None:
+        return "設定温度"
+    return f"{band.min_c:g}℃"
+
+
+def normal_threshold_text(bands: list[Band]) -> str:
+    normal = band_by_name(bands, "normal")
+    if normal is None or normal.max_c is None:
+        return "normal"
+    return f"{normal.max_c:g}℃未満"
 
 
 def should_use_active_interval(band: str, bands: list[Band], active_from_band: str | None) -> bool:
@@ -347,10 +368,9 @@ def format_temp(value: float | None) -> str:
 
 
 def build_discord_message(reading: Reading, band: str, bands: list[Band], process_summary: str) -> str:
-    severity = "危険" if band == highest_band_name(bands) else "注意"
     return "\n".join(
         [
-            f"{severity}: Mac mini の温度が {band} 帯（{band_label(bands, band)}）に入りました",
+            f"Mac mini の温度が {band_threshold_text(bands, band)}を超えました",
             f"機種: {reading.machine}",
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
@@ -361,15 +381,12 @@ def build_discord_message(reading: Reading, band: str, bands: list[Band], proces
 
 
 def build_recovery_message(reading: Reading, previous_band: str, bands: list[Band]) -> str:
-    normal_label = band_label(bands, "normal")
-    previous_label = band_label(bands, previous_band)
     return "\n".join(
         [
-            f"復旧: Mac mini の温度が normal 帯（{normal_label}）に戻りました",
+            f"Mac mini の温度が {normal_threshold_text(bands)}に戻りました",
             f"機種: {reading.machine}",
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
-            f"前回通知帯: {previous_band}（{previous_label}）",
         ]
     )[:1900]
 
