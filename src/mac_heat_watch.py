@@ -36,8 +36,8 @@ class Band:
 DEFAULT_BANDS = [
     Band("normal", "通常", 0.0, 60.0),
     Band("watch", "注意", 60.0, 70.0),
-    Band("elevated", "警戒", 70.0, 80.0),
-    Band("hot", "高温", 80.0, 90.0),
+    Band("elevated", "警告", 70.0, 80.0),
+    Band("hot", "厳重警告", 80.0, 90.0),
     Band("danger", "危険", 90.0, None),
 ]
 
@@ -368,7 +368,7 @@ def format_temp(value: float | None) -> str:
 
 
 def build_discord_message(reading: Reading, band: str, bands: list[Band], process_summary: str) -> str:
-    severity = "危険" if band == highest_band_name(bands) else "注意"
+    severity = band_label(bands, band)
     return "\n".join(
         [
             f"{severity}: Mac mini の温度が {band_threshold_text(bands, band)}を超えました",

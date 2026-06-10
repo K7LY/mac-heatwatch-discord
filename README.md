@@ -115,8 +115,8 @@ Example:
   "temperature_bands": [
     { "name": "normal", "label_ja": "通常", "min_c": 0, "max_c": 60 },
     { "name": "watch", "label_ja": "注意", "min_c": 60, "max_c": 70 },
-    { "name": "elevated", "label_ja": "警戒", "min_c": 70, "max_c": 80 },
-    { "name": "hot", "label_ja": "高温", "min_c": 80, "max_c": 90 },
+    { "name": "elevated", "label_ja": "警告", "min_c": 70, "max_c": 80 },
+    { "name": "hot", "label_ja": "厳重警告", "min_c": 80, "max_c": 90 },
     { "name": "danger", "label_ja": "危険", "min_c": 90, "max_c": null }
   ]
 }
@@ -155,8 +155,8 @@ cp ./config.example.json "$HOME/Library/Application Support/mac-heat-watch/confi
   "temperature_bands": [
     { "name": "normal", "label_ja": "通常", "min_c": 0, "max_c": 60 },
     { "name": "watch", "label_ja": "注意", "min_c": 60, "max_c": 70 },
-    { "name": "elevated", "label_ja": "警戒", "min_c": 70, "max_c": 80 },
-    { "name": "hot", "label_ja": "高温", "min_c": 80, "max_c": 90 },
+    { "name": "elevated", "label_ja": "警告", "min_c": 70, "max_c": 80 },
+    { "name": "hot", "label_ja": "厳重警告", "min_c": 80, "max_c": 90 },
     { "name": "danger", "label_ja": "危険", "min_c": 90, "max_c": null }
   ]
 }
