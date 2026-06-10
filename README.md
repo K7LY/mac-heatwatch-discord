@@ -12,7 +12,8 @@ Mac mini のチップ温度を `macmon` で定期的に確認し、想定外の�
 - Sends a recovery notification when a previously notified band returns to normal
 - Suppresses repeated notifications while staying in the same band
 - Sends another notification when the temperature moves into a higher band
-- Always notifies on every run while in the highest band, `danger` by default
+- Keeps checking at the active interval while the temperature is above the configured active band
+- Repeats highest-band notifications at a configurable interval, `danger` every 5 minutes by default
 - Includes likely load-causing processes from `ps`, without process arguments
 
 ## 動作
@@ -23,7 +24,8 @@ Mac mini のチップ温度を `macmon` で定期的に確認し、想定外の�
 - 通知済みの温度帯から normal に戻った場合は、正常化したことも通知
 - 同じ温度帯に居続けている間は再通知しない
 - より高い温度帯に上がったら再通知
-- 一番上の温度帯、デフォルトでは `danger`、にいる間は毎回通知
+- 設定したactive温度帯以上では、active間隔で監視し続ける
+- 一番上の温度帯、デフォルトでは `danger`、の連続通知は設定した間隔で送る
 - 通知時だけ `ps` で原因候補プロセスを確認し、プロセス引数は含めない
 
 ## Temperature Bands
@@ -89,9 +91,12 @@ cp ./config.example.json "$HOME/Library/Application Support/mac-heat-watch/confi
 
 Main options:
 
-- `interval_seconds`: monitoring interval. Default is `1800` seconds. Run `./scripts/install_launch_agent.sh` again after changing it
+- `interval_seconds`: normal monitoring interval. Default is `1800` seconds. Run `./scripts/install_launch_agent.sh` again after changing it
+- `active_interval_seconds`: monitoring interval while at or above `active_from_band`
+- `active_from_band`: band that starts active monitoring. Default behavior uses the first non-normal band
 - `notify_on_recovery`: when `true`, notify when a notified band returns to normal
-- `repeat_highest_band`: when `true`, notify on every run while in the highest band
+- `repeat_highest_band`: when `true`, allow repeated notifications while in the highest band
+- `highest_band_repeat_interval_seconds`: minimum interval between repeated highest-band notifications. Use `0` to notify every active check
 - `temperature_bands`: configurable temperature bands. The first band must be `normal`, and the final band must have `"max_c": null`
 - `keychain_service`: Keychain service name used to read the webhook URL
 
@@ -100,8 +105,11 @@ Example:
 ```json
 {
   "interval_seconds": 1800,
+  "active_interval_seconds": 30,
+  "active_from_band": "watch",
   "notify_on_recovery": true,
   "repeat_highest_band": true,
+  "highest_band_repeat_interval_seconds": 300,
   "temperature_bands": [
     { "name": "normal", "label_ja": "通常", "min_c": 0, "max_c": 60 },
     { "name": "watch", "label_ja": "注意", "min_c": 60, "max_c": 70 },
@@ -123,9 +131,12 @@ cp ./config.example.json "$HOME/Library/Application Support/mac-heat-watch/confi
 
 主な設定:
 
-- `interval_seconds`: 監視間隔。デフォルトは `1800` 秒。変更後は `./scripts/install_launch_agent.sh` を再実行してください
+- `interval_seconds`: 通常時の監視間隔。デフォルトは `1800` 秒。変更後は `./scripts/install_launch_agent.sh` を再実行してください
+- `active_interval_seconds`: `active_from_band` 以上にいる間の監視間隔
+- `active_from_band`: active監視を開始する温度帯。デフォルト動作では最初の非normal帯を使います
 - `notify_on_recovery`: `true` なら、通知済み温度帯から normal に戻った時も通知
-- `repeat_highest_band`: `true` なら、一番上の温度帯にいる間は毎回通知
+- `repeat_highest_band`: `true` なら、一番上の温度帯にいる間の連続通知を許可
+- `highest_band_repeat_interval_seconds`: 一番上の温度帯での連続通知の最短間隔。`0` ならactive監視ごとに通知
 - `temperature_bands`: 温度帯。最初の `name` は `normal`、最後の `max_c` は `null` にしてください
 - `keychain_service`: webhook URL を読む Keychain service 名
 
@@ -134,8 +145,11 @@ cp ./config.example.json "$HOME/Library/Application Support/mac-heat-watch/confi
 ```json
 {
   "interval_seconds": 1800,
+  "active_interval_seconds": 30,
+  "active_from_band": "watch",
   "notify_on_recovery": true,
   "repeat_highest_band": true,
+  "highest_band_repeat_interval_seconds": 300,
   "temperature_bands": [
     { "name": "normal", "label_ja": "通常", "min_c": 0, "max_c": 60 },
     { "name": "watch", "label_ja": "注意", "min_c": 60, "max_c": 70 },

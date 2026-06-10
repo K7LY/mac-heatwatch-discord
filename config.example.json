@@ -1,7 +1,10 @@
 {
   "interval_seconds": 1800,
+  "active_interval_seconds": 30,
+  "active_from_band": "watch",
   "notify_on_recovery": true,
   "repeat_highest_band": true,
+  "highest_band_repeat_interval_seconds": 300,
   "keychain_service": "DISCORD_WARNING_WEBHOOK_URL",
   "temperature_bands": [
     {

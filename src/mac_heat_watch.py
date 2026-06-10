@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import shutil
@@ -19,6 +21,7 @@ APP_NAME = "mac-heat-watch"
 APP_SUPPORT = Path.home() / "Library" / "Application Support" / APP_NAME
 STATE_PATH = APP_SUPPORT / "state.json"
 CONFIG_PATH = APP_SUPPORT / "config.json"
+LOCK_PATH = APP_SUPPORT / "watch.lock"
 LOG_PATH = Path.home() / "Library" / "Logs" / APP_NAME / "watch.log"
 
 
@@ -53,6 +56,12 @@ class Reading:
         if not values:
             raise ValueError("CPU/GPU temperature values are unavailable")
         return max(values)
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    exit_code: int
+    band: str | None
 
 
 def log(message: str) -> None:
@@ -105,6 +114,14 @@ def config_bool(config: dict[str, Any], key: str, default: bool) -> bool:
     return default
 
 
+def config_int(config: dict[str, Any], key: str, default: int, minimum: int = 0) -> int:
+    try:
+        value = int(config.get(key, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value)
+
+
 def load_bands(config: dict[str, Any]) -> list[Band]:
     raw_bands = config.get("temperature_bands", config.get("bands"))
     if not isinstance(raw_bands, list):
@@ -149,6 +166,13 @@ def highest_band_name(bands: list[Band]) -> str:
     return bands[-1].name
 
 
+def first_non_normal_band_name(bands: list[Band]) -> str | None:
+    for band in bands:
+        if band.name != "normal":
+            return band.name
+    return None
+
+
 def thresholds_summary(bands: list[Band], include_normal: bool = False) -> str:
     parts = []
     for band in bands:
@@ -161,6 +185,23 @@ def thresholds_summary(bands: list[Band], include_normal: bool = False) -> str:
         else:
             parts.append(f"{band.name} {band.min_c:g}℃以上")
     return " / ".join(parts)
+
+
+def should_use_active_interval(band: str, bands: list[Band], active_from_band: str | None) -> bool:
+    if band == "normal" or active_from_band is None:
+        return False
+    ranks = band_rank(bands)
+    return ranks.get(band, -1) >= ranks.get(active_from_band, len(bands))
+
+
+def seconds_since(timestamp: Any, now: datetime) -> float | None:
+    if not isinstance(timestamp, str):
+        return None
+    try:
+        previous = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+    return (now - previous).total_seconds()
 
 
 def read_state() -> dict[str, Any]:
@@ -180,6 +221,17 @@ def write_state(state: dict[str, Any]) -> None:
         json.dump(state, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
     tmp_path.replace(STATE_PATH)
+
+
+def acquire_lock() -> Any | None:
+    APP_SUPPORT.mkdir(parents=True, exist_ok=True)
+    handle = LOCK_PATH.open("w")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
 
 
 def load_webhook_url(config: dict[str, Any]) -> str | None:
@@ -325,30 +377,44 @@ def post_discord(webhook_url: str, content: str, dry_run: bool) -> None:
         raise RuntimeError(f"Discord returned HTTP {exc.code}: {body}") from exc
 
 
-def should_notify(state: dict[str, Any], band: str, bands: list[Band], repeat_highest_band: bool) -> bool:
+def should_notify(
+    state: dict[str, Any],
+    band: str,
+    bands: list[Band],
+    repeat_highest_band: bool,
+    highest_band_repeat_interval_seconds: int,
+    now: datetime,
+) -> bool:
     if band == "normal":
         return False
-    if repeat_highest_band and band == highest_band_name(bands):
-        return True
     last_notified = state.get("last_notified_band")
+
+    if band == highest_band_name(bands):
+        if state.get("last_notified_band") != band:
+            return True
+        if not repeat_highest_band:
+            return False
+        if highest_band_repeat_interval_seconds <= 0:
+            return True
+        elapsed = seconds_since(state.get("last_notified_at"), now)
+        if elapsed is None:
+            return True
+        return elapsed >= highest_band_repeat_interval_seconds
+
     if not isinstance(last_notified, str):
         return True
     ranks = band_rank(bands)
     return ranks[band] > ranks.get(last_notified, -1)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Monitor Mac chip temperature and notify Discord.")
-    parser.add_argument("--samples", type=int, default=1)
-    parser.add_argument("--interval-ms", type=int, default=1000)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--print-status", action="store_true")
-    args = parser.parse_args()
-
-    config = read_config()
-    bands = load_bands(config)
-    notify_on_recovery = config_bool(config, "notify_on_recovery", True)
-    repeat_highest_band = config_bool(config, "repeat_highest_band", True)
+def check_once(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    bands: list[Band],
+    notify_on_recovery: bool,
+    repeat_highest_band: bool,
+    highest_band_repeat_interval_seconds: int,
+) -> CheckResult:
     state = read_state()
 
     try:
@@ -356,10 +422,11 @@ def main() -> int:
     except Exception as exc:
         log(f"temperature read failed: {exc}")
         print(f"温度取得に失敗しました: {exc}", file=sys.stderr)
-        return 1
+        return CheckResult(1, None)
 
     band = band_for(reading.heat_level, bands)
-    now = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now()
+    now_iso = now.isoformat(timespec="seconds")
 
     if band == "normal":
         last_notified = state.get("last_notified_band")
@@ -368,12 +435,12 @@ def main() -> int:
             if not webhook_url:
                 log("recovery notification skipped: DISCORD_WARNING_WEBHOOK_URL is missing")
                 print("DISCORD_WARNING_WEBHOOK_URL が見つからないため復旧通知できません。", file=sys.stderr)
-                return 2
+                return CheckResult(2, band)
             post_discord(webhook_url, build_recovery_message(reading, last_notified, bands), args.dry_run)
             log(f"recovered: from {last_notified} CPU {format_temp(reading.cpu_temp)} / GPU {format_temp(reading.gpu_temp)}")
 
         write_state({
-            "last_seen_at": now,
+            "last_seen_at": now_iso,
             "last_band": band,
             "last_cpu_temp": reading.cpu_temp,
             "last_gpu_temp": reading.gpu_temp,
@@ -383,12 +450,12 @@ def main() -> int:
         log(message)
         if args.print_status:
             print(message)
-        return 0
+        return CheckResult(0, band)
 
-    if not should_notify(state, band, bands, repeat_highest_band):
+    if not should_notify(state, band, bands, repeat_highest_band, highest_band_repeat_interval_seconds, now):
         write_state({
             **state,
-            "last_seen_at": now,
+            "last_seen_at": now_iso,
             "last_band": band,
             "last_cpu_temp": reading.cpu_temp,
             "last_gpu_temp": reading.gpu_temp,
@@ -397,30 +464,71 @@ def main() -> int:
         log(message)
         if args.print_status:
             print(message)
-        return 0
+        return CheckResult(0, band)
 
     webhook_url = load_webhook_url(config)
     if not webhook_url:
         log("notification skipped: DISCORD_WARNING_WEBHOOK_URL is missing")
         print("DISCORD_WARNING_WEBHOOK_URL が見つからないため通知できません。", file=sys.stderr)
-        return 2
+        return CheckResult(2, band)
 
     process_summary = summarize_processes()
     content = build_discord_message(reading, band, bands, process_summary)
     post_discord(webhook_url, content, args.dry_run)
 
     write_state({
-        "last_seen_at": now,
+        "last_seen_at": now_iso,
         "last_band": band,
         "last_cpu_temp": reading.cpu_temp,
         "last_gpu_temp": reading.gpu_temp,
         "last_notified_band": band,
-        "last_notified_at": now,
+        "last_notified_at": now_iso,
     })
     log(f"notified: {band} CPU {format_temp(reading.cpu_temp)} / GPU {format_temp(reading.gpu_temp)}")
     if args.print_status:
         print(f"notified: {band}")
-    return 0
+    return CheckResult(0, band)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Monitor Mac chip temperature and notify Discord.")
+    parser.add_argument("--samples", type=int, default=1)
+    parser.add_argument("--interval-ms", type=int, default=1000)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--print-status", action="store_true")
+    parser.add_argument("--once", action="store_true", help="Run one check and exit, ignoring active monitoring.")
+    args = parser.parse_args()
+
+    lock_handle = acquire_lock()
+    if lock_handle is None:
+        log("another watcher instance is already running; exiting")
+        return 0
+
+    config = read_config()
+    bands = load_bands(config)
+    notify_on_recovery = config_bool(config, "notify_on_recovery", True)
+    repeat_highest_band = config_bool(config, "repeat_highest_band", True)
+    active_interval_seconds = config_int(config, "active_interval_seconds", 0, minimum=0)
+    highest_repeat_interval_seconds = config_int(config, "highest_band_repeat_interval_seconds", 0, minimum=0)
+    active_from_band = str(config.get("active_from_band") or first_non_normal_band_name(bands) or "")
+
+    while True:
+        result = check_once(
+            args,
+            config,
+            bands,
+            notify_on_recovery,
+            repeat_highest_band,
+            highest_repeat_interval_seconds,
+        )
+        if result.exit_code != 0:
+            return result.exit_code
+        if args.once or active_interval_seconds <= 0:
+            return 0
+        if result.band is None or not should_use_active_interval(result.band, bands, active_from_band):
+            return 0
+        log(f"active monitoring: band={result.band} sleeping {active_interval_seconds}s")
+        time.sleep(active_interval_seconds)
 
 
 if __name__ == "__main__":
