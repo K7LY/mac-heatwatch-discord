@@ -36,8 +36,8 @@ class Band:
 DEFAULT_BANDS = [
     Band("normal", "通常", 0.0, 60.0),
     Band("watch", "注意", 60.0, 70.0),
-    Band("elevated", "警告", 70.0, 80.0),
-    Band("hot", "厳重警告", 80.0, 90.0),
+    Band("elevated", "警戒", 70.0, 80.0),
+    Band("hot", "警告", 80.0, 90.0),
     Band("danger", "危険", 90.0, None),
 ]
 
