@@ -354,8 +354,6 @@ def build_discord_message(reading: Reading, band: str, bands: list[Band], proces
             f"機種: {reading.machine}",
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
-            f"現在の温度帯: {band}",
-            f"基準: {thresholds_summary(bands)}",
             "原因候補:",
             process_summary,
         ]
@@ -372,7 +370,6 @@ def build_recovery_message(reading: Reading, previous_band: str, bands: list[Ban
             f"時刻: {reading.timestamp}",
             f"CPU温度: {format_temp(reading.cpu_temp)} / GPU温度: {format_temp(reading.gpu_temp)}",
             f"前回通知帯: {previous_band}（{previous_label}）",
-            f"基準: {thresholds_summary(bands, include_normal=True)}",
         ]
     )[:1900]
 
