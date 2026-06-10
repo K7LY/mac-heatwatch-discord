@@ -15,6 +15,7 @@ Mac mini のチップ温度を `macmon` で定期的に確認し、想定外の�
 - Keeps checking at the active interval while the temperature is above the configured active band
 - Repeats highest-band notifications at a configurable interval, `danger` every 5 minutes by default
 - Includes likely load-causing processes from `ps`, with CPU normalized to whole-system percentage and without process arguments
+- Sends the temperature alert even if process collection fails
 
 ## 動作
 
@@ -27,6 +28,7 @@ Mac mini のチップ温度を `macmon` で定期的に確認し、想定外の�
 - 設定したactive温度帯以上では、active間隔で監視し続ける
 - 一番上の温度帯、デフォルトでは `danger`、の連続通知は設定した間隔で送る
 - 通知時だけ `ps` で原因候補プロセスを確認し、CPUは全体比に正規化し、プロセス引数は含めない
+- 原因候補プロセスの取得に失敗しても、温度警報は送信する
 
 ## Temperature Bands
 

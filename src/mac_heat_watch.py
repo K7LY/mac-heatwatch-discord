@@ -286,7 +286,11 @@ def band_for(temp_c: float, bands: list[Band]) -> str:
 
 
 def top_processes(sort_flag: str) -> list[dict[str, str]]:
-    result = run_command(["ps", sort_flag, "-xo", "pid,pcpu,pmem,comm"], timeout=10)
+    try:
+        result = run_command(["ps", sort_flag, "-xo", "pid,pcpu,pmem,comm"], timeout=10)
+    except Exception as exc:
+        log(f"process summary skipped: ps failed: {exc}")
+        return []
     if result.returncode != 0:
         return []
     rows = []
@@ -300,7 +304,11 @@ def top_processes(sort_flag: str) -> list[dict[str, str]]:
 
 
 def logical_cpu_count() -> int:
-    result = run_command(["sysctl", "-n", "hw.ncpu"], timeout=5)
+    try:
+        result = run_command(["sysctl", "-n", "hw.ncpu"], timeout=5)
+    except Exception as exc:
+        log(f"process summary using fallback CPU count: {exc}")
+        return 1
     if result.returncode != 0:
         return 1
     try:
@@ -489,7 +497,11 @@ def check_once(
         print("DISCORD_WARNING_WEBHOOK_URL が見つからないため通知できません。", file=sys.stderr)
         return CheckResult(2, band)
 
-    process_summary = summarize_processes()
+    try:
+        process_summary = summarize_processes()
+    except Exception as exc:
+        log(f"process summary failed; sending temperature alert anyway: {exc}")
+        process_summary = "取得失敗（温度警報を優先して送信）"
     content = build_discord_message(reading, band, bands, process_summary)
     post_discord(webhook_url, content, args.dry_run)
 
